@@ -1,0 +1,140 @@
+import requests 
+from urllib import urlencode
+from bs4 import BeautifulSoup
+import json
+import time
+from hashlib import md5
+url = 'http://218.240.145.213:9000/CTMDS/pub/PUB010100.do?method=handle05&_dt=20180807101448'
+header={
+    'Host': '218.240.145.213:9000',
+    'Referer:https':'//218.240.145.213:9000/CTMDS/apps/pub/public.jsp',
+    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 UBrowser/6.2.4094.1 Safari/537.36',
+    'X-Requested-With':'XMLHttpRequest'
+}
+data = {
+    'pageSize':200
+}
+url_base = 'http://218.240.145.213:9000/CTMDS/pub/PUB010100.do?'
+def get_page():
+    try:
+        r = requests.post(url,data=data)
+        if r.status_code == 200:
+            return r.json()
+    except requests.ConnectionError as e:
+        print 'error',e.args
+        
+def parse_page(json):
+    if json:
+        items = json.get('data')
+        for item in items:
+            msg = {}
+            msg['province'] = item.get('areaName')           
+            companyId = item.get('companyId')
+            params = {
+                'method':'handle04',
+                'compId': companyId
+            }
+            url2 = url_base + urlencode(params)
+            r2 = requests.get(url2)
+            r2.encoding='utf-8'
+            soup=BeautifulSoup(r2.text,'html.parser')
+            arr = list()
+            arr.append(msg['province'])
+            
+            for news in soup.select('.form-group'):
+                arr.append(news.select('div')[0].text.strip().replace('\t','').replace('\r','').replace('\n',''))
+            result = {}
+            result['province']=arr[0]
+            result['register_code']=arr[1]
+            result['hospital_name']=arr[2]
+            result['hospital_grade']=arr[3]
+            result['hospital_address']=arr[4]
+            arr_len = len(arr)
+            if arr_len !=9:
+                result['remark'] = ''
+                for i in range(5,arr_len-4):
+                    result['remark'] = result['remark'] + arr[i] +' '
+            result['contact_person']=arr[-4]
+            result['contact_phone']=arr[-3]
+            result['approval_date_original']=arr[-2]
+            result['approval_date']=arr[-2][0:10]
+            result['current_state']=arr[-1]                    
+            yield result
+
+            
+def parse_page_info(json):
+    if json:
+        items = json.get('data')
+        idd = 0
+        for item in items:
+            msg = {}
+            msg['province'] = item.get('areaName')
+            
+            companyId = item.get('companyId')
+            params = {
+                'method':'handle04',
+                'compId': companyId
+            }
+            url2 = url_base + urlencode(params)
+            r2 = requests.get(url2)
+            r2.encoding='utf-8'
+            soup=BeautifulSoup(r2.text,'html.parser')
+            arr = list()
+            arr.append(msg['province'])
+
+            for item in soup.select('tbody')[0].select('tr'):
+                clinic_trial_info={}
+                clinic_trial_info['idd']=idd
+                clinic_trial_info['profession_name']=item.select('td')[0].text
+                clinic_trial_info['main_researcher']=item.select('td')[1].text
+                clinic_trial_info['job_title']=item.select('td')[2].text    
+                yield clinic_trial_info
+            idd = idd + 1
+           
+            
+            
+def md5_(value):
+    id = md5(value.encode()).hexdigest()
+    return id
+
+def write_to_file_info():
+    json_ = get_page()
+    results = parse_page(json_)
+    results_info =parse_page_info(json_)
+    time1 = time.strftime('%Y-%m-%d',time.localtime()).replace('-','')
+    c = 0
+    with open('clinic_trial_info_'+time1+'.txt','w') as file1:
+        c=0
+        array = list()
+        for result in results:
+            array.append(md5_(json.dumps(result)))
+        for result_info in results_info:
+            result_info['id'] = md5_(json.dumps(result_info))
+            result_info['pid'] = array[result_info['idd']]
+            result_info['date'] = time1
+            result_info.pop('idd')
+            json_ = json.dumps(result_info,ensure_ascii=False).encode('utf-8')
+            file1.write(json_ + '\n')
+            c = c + 1
+        print c
+
+def write_to_file():
+    json_ = get_page()
+    results = parse_page(json_)
+    time1 = time.strftime('%Y-%m-%d',time.localtime()).replace('-','')
+    with open('clinic_trial_list_'+time1+'.txt','w') as file1:
+#    file1 = open('medicine.json', 'w')
+        c=0
+        for result in results:
+            result['id'] = md5_(json.dumps(result))
+            result['date'] = time1
+            
+            c = c+1
+            json_ = json.dumps(result,ensure_ascii=False).encode('utf-8')
+            file1.write(json_ + '\n')
+        print c
+        
+if __name__ == '__main__':
+    write_to_file_info()
+    write_to_file()
+    
